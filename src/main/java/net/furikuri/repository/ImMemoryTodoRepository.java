@@ -8,7 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Repository
-//@Profile("mock")
+@Profile("mock")
 public class ImMemoryTodoRepository implements TodoRepository {
 
   private List<Todo> todos = new ArrayList<>();
