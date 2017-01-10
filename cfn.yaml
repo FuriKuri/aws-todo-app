@@ -293,3 +293,7 @@ Resources:
         MaxBatchSize: '1'
         WaitOnResourceSignals: 'true'
         PauseTime: PT10M
+Outputs:
+  LoadBalancer:
+    Description: 'The ELB address'
+    Value: !GetAtt [ExternalELB, DNSName]
