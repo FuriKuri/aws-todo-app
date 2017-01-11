@@ -14,3 +14,8 @@ aws cloudformation update-stack --capabilities CAPABILITY_IAM --stack-name todo-
         --parameters ParameterKey=SoftwareVersion,ParameterValue=latest \
         ParameterKey=TableName,ParameterValue=todo-table
 ```
+
+### Get stack information
+```
+aws cloudformation describe-stacks --stack-name todo-app
+```
