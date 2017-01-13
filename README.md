@@ -1,14 +1,14 @@
 # aws-todo-app
 
 ## Deploy
-### Create
+### Create (mock version)
 ```
 aws cloudformation create-stack --capabilities CAPABILITY_IAM --stack-name todo-app --template-body file://cfn.yaml \
-        --parameters ParameterKey=SoftwareVersion,ParameterValue=latest \
+        --parameters ParameterKey=SoftwareVersion,ParameterValue=mock \
         ParameterKey=TableName,ParameterValue=todo-table
 ```
 
-### Update
+### Update (latest version)
 ```
 aws cloudformation update-stack --capabilities CAPABILITY_IAM --stack-name todo-app --template-body file://cfn.yaml \
         --parameters ParameterKey=SoftwareVersion,ParameterValue=latest \
