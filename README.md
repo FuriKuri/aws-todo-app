@@ -19,3 +19,8 @@ aws cloudformation update-stack --capabilities CAPABILITY_IAM --stack-name todo-
 ```
 aws cloudformation describe-stacks --stack-name todo-app
 ```
+
+### Delete stack
+```
+aws cloudformation delete-stack --stack-name todo-app
+```
