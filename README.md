@@ -5,7 +5,7 @@
 Replace following parameters with your own:
 * `--stack-name`
 * `ParameterKey=TableName`
-* `ParameterKey=SubNet`
+* `ParameterKey=SubNet
 
 ### Create (mock version)
 ```
@@ -21,6 +21,11 @@ aws cloudformation update-stack --capabilities CAPABILITY_IAM --stack-name todo-
         --parameters ParameterKey=SoftwareVersion,ParameterValue=latest \
         ParameterKey=TableName,ParameterValue=todo-table \
         ParameterKey=SubNet,ParameterValue=10
+```
+
+## Deploy VPC
+```
+aws cloudformation create-stack --capabilities CAPABILITY_IAM --stack-name todo-app-vpc --template-body file://vpc-cfn.yaml
 ```
 
 ## Deploy
