@@ -1,0 +1,264 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'The AWS stack for Todo App'
+Parameters:
+  SoftwareVersion:
+    Type: String
+    Description: 'The software version'
+  TableName:
+    Type: String
+    Description: 'The name of the DynamoDB table'
+  SubNet:
+    Type: String
+    Description: 'SubNet'
+Resources:
+  SubnetA:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Join [ "", [!Ref 'AWS::Region', a]]
+      CidrBlock: !Sub 10.0.${SubNet}.0/25
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !ImportValue todo-app-vpc-vpc
+      Tags:
+        - Key: Name
+          Value: TodoAppA
+        - Key: CostObject
+          Value: TodoApp
+  SubnetB:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      AvailabilityZone: !Join [ "", [!Ref 'AWS::Region', b]]
+      CidrBlock: !Sub 10.0.${SubNet}.128/25
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !ImportValue todo-app-vpc-vpc
+      Tags:
+        - Key: Name
+          Value: TodoAppB
+        - Key: CostObject
+          Value: TodoApp
+  SubnetARouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !ImportValue todo-app-vpc-public-route-table
+  SubnetBRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !ImportValue todo-app-vpc-public-route-table
+  ELBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security group for load balancer'
+      VpcId: !ImportValue todo-app-vpc-vpc
+      Tags:
+        - Key: Name
+          Value: !Sub |
+              TodoApp-Routing
+        - Key: CostObject
+          Value: TodoApp
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+  ServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: 'Security group for servers'
+      VpcId: !ImportValue todo-app-vpc-vpc
+      Tags:
+        - Key: Name
+          Value: !Sub |
+              TodoApp-Routing
+        - Key: CostObject
+          Value: TodoApp
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '8080'
+          ToPort: '8080'
+          SourceSecurityGroupId: !Ref ELBSecurityGroup
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: 0.0.0.0/0
+  CloudWatchLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      RetentionInDays: 7
+  DynamoDBTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: !Ref TableName
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+  IAMRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: TodoAppInstancePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:GetRepositoryPolicy'
+                  - 'ecr:DescribeRepositories'
+                  - 'ecr:ListImages'
+                  - 'ecr:BatchGetImage'
+                Resource: '*'
+                Effect: Allow
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:*'
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}/index/*
+              - Action:
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Effect: Allow
+                Resource: !GetAtt [CloudWatchLogGroup, Arn]
+              - Action:
+                  - 'cloudformation:SignalResource'
+                Effect: Allow
+                Resource:
+                  - !Sub arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*
+  IAMInstanceProfile:
+    Type: 'AWS::IAM::InstanceProfile'
+    Properties:
+      Path: /
+      Roles:
+        - !Ref IAMRole
+  ExternalELB:
+    Type: 'AWS::ElasticLoadBalancing::LoadBalancer'
+    Properties:
+      CrossZone: true
+      Listeners:
+        - LoadBalancerPort: '80'
+          InstancePort: '8080'
+          InstanceProtocol: HTTP
+          Protocol: HTTP
+      HealthCheck:
+        Target: 'HTTP:8080/health'
+        HealthyThreshold: '2'
+        UnhealthyThreshold: '2'
+        Interval: '6'
+        Timeout: '5'
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ELBSecurityGroup
+      Subnets:
+        - !Ref SubnetA
+        - !Ref SubnetB
+      Tags:
+        - Key: CostObject
+          Value: TodoApp
+  LaunchConfig:
+    Type: 'AWS::AutoScaling::LaunchConfiguration'
+    Properties:
+      AssociatePublicIpAddress: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            VolumeType: gp2
+            VolumeSize: '8'
+      EbsOptimized: false
+      InstanceMonitoring: false
+      IamInstanceProfile: !Ref IAMInstanceProfile
+      ImageId: ami-c90bf8a6
+      InstanceType: t2.nano
+      SecurityGroups:
+        - !Ref ServerSecurityGroup
+      UserData:
+        'Fn::Base64': !Sub
+          - |
+            #cloud-config
+            ssh_authorized_keys:
+              - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDw7ifk0cFD7rvJeXAwRjSXFhOz4i1GJt0SMwUlDZuSgokGb9aI6pea4UqtWfadlk57Rwlrr3xLFwAJxYBiSgpUSJBfaaeDEJOo4NS1dpXl1OpV/be8daKUgWIyn/oqSxfQCII7HCZyEnakefKm+wlFgWoAv+WujVgTtBwL76+ed1Rt/643Hoek2/6vpI9d6T+HaEtVCT6TDQOqJu1vidvK6s7zLoETRI6j8k269tNxVr5zw2tpHQHN6xD7T3lV05roXR5qwtJsM+yO9L5q37Mht+y5olCb1jeHyxeGcPEeIHe/6DeVFUa7Pa2ErStUE73Gi5DOnIWcgkerpkNixq5h tf.pack@googlemail.com"
+            coreos:
+              units:
+                - name: update-engine.service
+                  command: stop
+                - name: locksmithd.service
+                  command: stop
+                - name: "todo.service"
+                  command: "start"
+                  content: |
+                    [Unit]
+                    Description=Todo App
+                    After=docker.service
+
+                    [Service]
+                    Restart=always
+                    Environment=IMAGE=${AWS::AccountId}.dkr.ecr.eu-central-1.amazonaws.com/todo-app:${DockerTag}
+                    ExecStartPre=-/usr/bin/docker kill todo
+                    ExecStartPre=-/usr/bin/docker rm todo
+                    ExecStartPre=/bin/bash -c 'eval $(docker run --rm -e AWS_DEFAULT_REGION=eu-central-1 crewjam/awscli:latest aws ecr get-login --region eu-central-1)'
+                    ExecStartPre=-/usr/bin/docker pull ${!IMAGE}
+                    ExecStop=/usr/bin/docker stop -t 2 todo
+                    ExecStartPost=-/usr/bin/docker run --rm crewjam/awscli:latest cfn-signal \
+                              -e 0 --stack ${AWS::StackName} --resource AutoScalingGroup --region eu-central-1
+                    ExecStart=/usr/bin/docker run --restart=always \
+                              -p 8080:8080 --name todo \
+                              --log-driver awslogs --log-opt awslogs-region=${AWS::Region} --log-opt awslogs-group=${CloudWatchLogGroup} \
+                              -e AWS_TABLE=${TableName} \
+                              ${!IMAGE}
+          - DockerTag: !Ref SoftwareVersion
+  AutoScalingGroup:
+    Type: 'AWS::AutoScaling::AutoScalingGroup'
+    Properties:
+      LoadBalancerNames:
+        - !Ref ExternalELB
+      DesiredCapacity: '2'
+      HealthCheckGracePeriod: 300
+      HealthCheckType: ELB
+      LaunchConfigurationName: !Ref LaunchConfig
+      MaxSize: '2'
+      MinSize: '1'
+      Tags:
+        - Key: CostObject
+          Value: TodoApp
+          PropagateAtLaunch: 'true'
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+        - !Ref SubnetB
+    UpdatePolicy:
+      AutoScalingScheduledAction:
+        IgnoreUnmodifiedGroupSizeProperties: 'true'
+      AutoScalingRollingUpdate:
+        MinInstancesInService: '1'
+        MaxBatchSize: '1'
+        WaitOnResourceSignals: 'true'
+        PauseTime: PT10M
+Outputs:
+  LoadBalancer:
+    Description: 'The ELB address'
+    Value: !GetAtt [ExternalELB, DNSName]
